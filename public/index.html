@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="google-site-verification" content="T5hwgGoe7ivBJZnzHj7hSd4D3R1VaDBqhXe4ufpOLjc" />
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#070d18">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -145,7 +144,7 @@ function render(){
   if(r==='admin'){document.title='Admin · '+D.name;return renderAdmin();}
   const pg=D.pages.find(p=>p.id===r)||D.pages[0];
   document.title=pg.title+' · '+D.name;
-  $.innerHTML=header(pg.id)+'<main>'+pg.blocks.map(block).join('')+'</main><footer><div class="wrap">'+esc(D.footer)+'</div></footer>';
+  $.innerHTML=header(pg.id)+'<main>'+pg.blocks.map(block).join('')+'</main><footer><div class="wrap">'+esc(D.footer)+' <a href="#admin" style="float:right;opacity:.45;text-decoration:none">Admin</a></div></footer>';
   window.scrollTo(0,0);applyVid();
 }
 
@@ -182,11 +181,11 @@ function blockEd(b,bi){
   return h+'</div>';
 }
 function renderAdmin(){
-  if(!canEdit){$.innerHTML=header('')+'<section><div class="wrap"><h2>Admin</h2><p class="muted">Only the site owner or editors can open the admin area. If that is you, open this page while signed in to Claude.</p><a class="btn" href="#'+esc(D.pages[0].id)+'">Back to site</a></div></section>';return;}
+  if(!canEdit){$.innerHTML=header('')+'<section><div class="wrap" style="max-width:420px"><h2>Admin login</h2><form class="c" onsubmit="return doLogin(this)"><input name="p" type="password" placeholder="Admin password" autocomplete="current-password" required><button class="btn" type="submit">Log in</button></form></div></section>';return;}
   if(selP>=D.pages.length)selP=0;
   const pg=D.pages[selP];
   let h='<div class="adm-bar"><div class="wrap"><b>Admin</b><a class="sm" href="#'+esc(pg.id)+'" style="text-decoration:none">View page</a><span class="sp note">'+esc(msg||'Changes are previewed live. Publish to make them public.')+'</span><button class="sm" onclick="if(!dirty||confirm(\'Discard all unpublished changes?\')){dirty=false;location.reload()}">Discard</button><button class="btn" id="pubBtn" style="margin:0;padding:8px 16px" onclick="publish()">Publish changes'+(dirty?' ●':'')+'</button></div></div><div class="wrap">';
-  h+='<div class="panel"><h3>Site settings</h3>'+fld('Company name','name',D.name)+fld('Tagline','tagline',D.tagline)+fld('Footer text','footer',D.footer)+'<label>Hero banner video (looping, silent, MP4 or WebM under 20 MB)</label><div class="row"><input type="file" accept="video/mp4,video/webm" onchange="upVid(this)" style="flex:1"><button class="sm del" onclick="setp(\'video\',\'\');applyVid();renderAdmin()">Remove video</button></div><p class="note">'+(D.video?'A hero video is active.':'No hero video set.')+'</p><label>Brand colour (blue)</label><input type="color" value="'+esc(D.accent)+'" oninput="setp(\'accent\',this.value)" style="height:42px;padding:3px"><label>Second brand colour (orange)</label><input type="color" value="'+esc(D.accent2)+'" oninput="setp(\'accent2\',this.value)" style="height:42px;padding:3px"></div>';
+  h+='<div class="panel"><h3>Site settings</h3>'+fld('Company name','name',D.name)+fld('Tagline','tagline',D.tagline)+fld('Footer text','footer',D.footer)+''+fld('Hero video file (e.g. /monarch-bg.mp4, leave empty for none)','video',D.video)+'<label>Brand colour (blue)</label><input type="color" value="'+esc(D.accent)+'" oninput="setp(\'accent\',this.value)" style="height:42px;padding:3px"><label>Second brand colour (orange)</label><input type="color" value="'+esc(D.accent2)+'" oninput="setp(\'accent2\',this.value)" style="height:42px;padding:3px"></div>';
   h+='<div class="panel"><h3>Pages</h3><div class="tabs">'+D.pages.map((p,i)=>'<button class="sm '+(i===selP?'on':'')+'" onclick="selP='+i+';renderAdmin()">'+esc(p.title)+'</button>').join('')+'<button class="sm" onclick="addPage()">+ New page</button></div>';
   h+=fld('Page title (shown in menu)','pages.'+selP+'.title',pg.title);
   h+='<div class="row" style="margin-top:10px"><button class="sm" onclick="mvPage('+selP+',-1)">← Move earlier</button><button class="sm" onclick="mvPage('+selP+',1)">Move later →</button><button class="sm del" onclick="delPage('+selP+')">Delete page</button></div></div>';
@@ -195,32 +194,26 @@ function renderAdmin(){
   h+='<div class="panel"><h3>Security</h3><div class="note">How this site is protected:<ul><li>Only the owner and invited editors can open Admin or publish. This is enforced by Claude, not just hidden in the page.</li><li>All text is escaped and validated on load, so pasted code cannot run.</li><li>No third-party scripts, trackers or external requests.</li><li>The contact form has spam protection and rate limiting, and nothing is stored in the browser.</li><li>Publishing and discarding both ask for confirmation. Share the page with Editor access only to people you trust.</li></ul></div></div>';
   $.innerHTML=h;
 }
+let pw='';
+const api=b=>fetch('/api/content',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+async function doLogin(f){
+  try{const r=await api({action:'check',password:f.p.value});
+    if(r.ok){pw=f.p.value;canEdit=true;msg='';renderAdmin();}
+    else alert(r.status===429?'Too many attempts. Please wait a minute.':'Incorrect password.');
+  }catch(e){alert('Could not reach the server.');}
+  return false;
+}
 async function publish(){
   if(!canEdit||!confirm('Publish changes to the live site?'))return;
-  if(!art){msg='Publishing is unavailable in this view.';return renderAdmin();}
-  try{
-    const c=document.documentElement.cloneNode(true);
-    c.querySelector('#app').innerHTML='';
-    c.querySelector('#site-data').textContent=JSON.stringify(D).replace(/</g,'\\u003c');
-    c.removeAttribute('style');
-    msg='Publishing…';renderAdmin();
-    await art.publish('<!doctype html>\n'+c.outerHTML);
-    dirty=false;
-  }catch(e){msg='Could not publish: '+(e&&e.code||e&&e.message||'error');renderAdmin();}
+  try{msg='Publishing…';renderAdmin();const r=await api({action:'save',password:pw,data:D});
+    if(!r.ok)throw new Error('error '+r.status);dirty=false;msg='Published. Your changes are live.';
+  }catch(e){msg='Could not publish ('+e.message+').';}
+  renderAdmin();
 }
 window.addEventListener('hashchange',render);
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
 render();
-(async()=>{
-  try{
-    if(!window.claude||!claude.use)return;
-    const u=await claude.use('user');
-    canEdit=!!(u&&u.canEdit());
-    art=await claude.use('artifact');
-    if(!art)canEdit=canEdit&&false||canEdit;
-    render();
-  }catch(e){}
-})();
+(async()=>{try{const r=await fetch('/api/content',{cache:'no-store'});if(r.ok){const j=await r.json();if(j&&Array.isArray(j.pages)&&!dirty){Object.keys(D).forEach(k=>delete D[k]);Object.assign(D,j);clean();render();}}}catch(e){}})();
 </script>
 </body>
 </html>
